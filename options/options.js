@@ -34,11 +34,11 @@ function populateForm(settings) {
 }
 
 /**
- * Load settings from chrome.storage.local, falling back to defaults.
+ * Load settings from (globalThis.browser || globalThis.chrome).storage.local, falling back to defaults.
  */
 function loadSettings() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(null, (items) => {
+    (globalThis.browser || globalThis.chrome).storage.local.get(null, (items) => {
       const settings = { ...DEFAULT_SETTINGS, ...items };
       populateForm(settings);
       resolve(settings);
@@ -48,7 +48,7 @@ function loadSettings() {
 
 async function loadModels() {
   const baseUrl = $("baseUrl")?.value || DEFAULT_SETTINGS.baseUrl;
-  const res = await new Promise(resolve => chrome.runtime.sendMessage({ type: "FETCH_MODELS", baseUrl }, resolve));
+  const res = await new Promise(resolve => (globalThis.browser || globalThis.chrome).runtime.sendMessage({ type: "FETCH_MODELS", baseUrl }, resolve));
   const statusEl = $("server-status");
   if (!statusEl) return;
   if (res?.ok) {
@@ -102,7 +102,7 @@ function saveSettings() {
     maxContextChars: isNaN(maxContextChars) ? DEFAULT_SETTINGS.maxContextChars : maxContextChars,
   };
 
-  chrome.storage.local.set(settings, () => {
+  (globalThis.browser || globalThis.chrome).storage.local.set(settings, () => {
     const statusMsg = $("status-msg");
     if (statusMsg) {
       statusMsg.textContent = "Settings saved.";
@@ -150,7 +150,7 @@ function handleProviderChange() {
  * Set up event listeners for form submission and reset button.
  */
 function setupEventListeners() {
-  const form = $("#settings-form");
+  const form = $("settings-form");
   if (form) {
     form.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -158,7 +158,7 @@ function setupEventListeners() {
     });
   }
 
-  const resetBtn = $("#reset-btn");
+  const resetBtn = $("reset-btn");
   if (resetBtn) {
     resetBtn.addEventListener("click", (e) => {
       e.preventDefault();

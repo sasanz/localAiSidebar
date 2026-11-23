@@ -112,24 +112,50 @@ function setStreamingState(isStreaming) {
   if (stopBtn) stopBtn.hidden = !isStreaming;
 }
 
+function normalizeBaseUrl(rawUrl) {
+  let u = String(rawUrl || "http://127.0.0.1:1234/v1").trim().replace(/\/+$/, "");
+  if (!u.endsWith("/v1")) u += "/v1";
+  return u;
+}
+
 async function loadModels() {
+  const api = globalThis.browser || globalThis.chrome;
   try {
-    const res = await chrome.runtime.sendMessage({ type: "FETCH_MODELS" });
-    const models = Array.isArray(res?.models)
-      ? res.models
-      : Array.isArray(res?.models?.data)
-      ? res.models.data.map((m) => m.id || m)
-      : [];
-    if (!modelSelect) return;
-    while (modelSelect.options.length > 1) modelSelect.remove(1);
+    let models = [];
+    if (api?.runtime?.sendMessage) {
+      const res = await api.runtime.sendMessage({ type: "FETCH_MODELS" }).catch(() => null);
+      if (Array.isArray(res?.models)) {
+        models = res.models;
+      } else if (Array.isArray(res?.models?.data)) {
+        models = res.models.data.map((m) => m.id || m);
+      }
+    }
+
+    // Fallback: query storage + /models directly if service worker was still waking up
+    if (models.length === 0 && api?.storage?.local?.get && typeof globalThis.fetch === "function") {
+      const stored = await api.storage.local.get({ baseUrl: "http://127.0.0.1:1234/v1" });
+      const baseUrl = normalizeBaseUrl(stored?.baseUrl);
+      const directRes = await globalThis.fetch(`${baseUrl}/models`);
+      if (directRes.ok) {
+        const data = await directRes.json();
+        if (Array.isArray(data?.data)) models = data.data.map((m) => m.id).filter(Boolean);
+        else if (Array.isArray(data?.models)) models = data.models.map((m) => m.name || m.id).filter(Boolean);
+      }
+    }
+
+    const selectEl = globalThis.document?.getElementById("model-select");
+    if (!selectEl) return models;
+    while (selectEl.options.length > 1) selectEl.remove(1);
     models.forEach((id) => {
-      const opt = document.createElement("option");
+      const opt = globalThis.document.createElement("option");
       opt.value = id;
       opt.textContent = id;
-      modelSelect.appendChild(opt);
+      selectEl.appendChild(opt);
     });
+    return models;
   } catch (err) {
     console.error("Failed to load models:", err);
+    return [];
   }
 }
 
@@ -299,8 +325,8 @@ newChatBtn?.addEventListener("click", () => {
 optionsBtn?.addEventListener("click", () => chrome.runtime.openOptionsPage());
 refreshPageBtn?.addEventListener("click", () => refreshPageContext());
 
-globalThis.chrome?.tabs?.onActivated?.addListener(() => refreshPageContext());
-globalThis.chrome?.tabs?.onUpdated?.addListener((_tabId, info) => {
+(globalThis.browser || globalThis.chrome)?.tabs?.onActivated?.addListener(() => refreshPageContext());
+(globalThis.browser || globalThis.chrome)?.tabs?.onUpdated?.addListener((_tabId, info) => {
   if (info.status === "complete") refreshPageContext();
 });
 
@@ -310,5 +336,17 @@ globalThis.document?.addEventListener("DOMContentLoaded", () => {
 });
 
 if (typeof module !== "undefined") {
-  module.exports = { renderMarkdown, escapeHtml };
+  module.exports = { renderMarkdown, escapeHtml, loadModels, normalizeBaseUrl };
 }
+
+// Reload models automatically when baseUrl changes in storage or after service worker wake-up
+(globalThis.browser || globalThis.chrome)?.storage?.onChanged?.addListener((changes, area) => {
+  if (area === "local" && changes.baseUrl && typeof loadModels === "function") {
+    loadModels();
+  }
+});
+setTimeout(() => {
+  if (modelSelect && modelSelect.options.length <= 1 && typeof loadModels === "function") {
+    loadModels();
+  }
+}, 300);

@@ -1,0 +1,134 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0e0e10; color: #e3e3e3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 14px; }
+header, .top-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; background: #131314; border-bottom: 1px solid rgba(255,255,255,0.08); flex-shrink: 0; }
+header h1, .brand { font-size: 15px; font-weight: 600; background: linear-gradient(90deg, #8ab4f8, #c58af9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; white-space: nowrap; }
+#model-select { background: #1e1f20; color: #e3e3e3; border: 1px solid rgba(255,255,255,0.12); border-radius: 999px; padding: 4px 10px; font-size: 12px; max-width: 150px; outline: none; cursor: pointer; }
+button { background: transparent; color: #c4c7c5; border: none; border-radius: 50%; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s; }
+button:hover { background: #282a2c; color: #ffffff; }
+.context-bar, .pill-bar { display: flex; align-items: center; gap: 8px; margin: 8px 14px 0; padding: 6px 12px; background: #1e1f20; border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; font-size: 12px; color: #9aa0a6; flex-shrink: 0; }
+#page-status { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-messages { flex: 1; overflow-y: auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 14px; }
+#welcome-state { margin: auto; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px 10px; }
+#welcome-state h2, #welcome-state p { font-size: 20px; font-weight: 600; background: linear-gradient(135deg, #4285f4, #9b72cb, #d96570); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.prompt-chip { width: auto; height: auto; border-radius: 999px; background: #1e1f20; border: 1px solid rgba(255,255,255,0.1); padding: 8px 14px; font-size: 13px; color: #e3e3e3; }
+.prompt-chip:hover { background: #282a2c; border-color: #8ab4f8; }
+.message.user { align-self: flex-end; background: #282a2c; color: #e3e3e3; padding: 10px 15px; border-radius: 18px 18px 4px 18px; max-width: 85%; line-height: 1.5; word-wrap: break-word; }
+.message.assistant { align-self: flex-start; width: 100%; color: #e3e3e3; line-height: 1.6; word-wrap: break-word; }
+.message pre { background: #17181a; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; font-size: 12px; }
+.message code { font-family: Consolas, monospace; background: #1e1f20; padding: 2px 5px; border-radius: 4px; font-size: 12px; }
+footer, .composer { margin: 8px 14px 14px; background: #1e1f20; border: 1px solid rgba(255,255,255,0.12); border-radius: 22px; padding: 10px 12px 8px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+footer:focus-within, .composer:focus-within { border-color: #8ab4f8; }
+#user-input { width: 100%; background: transparent; border: none; color: #e3e3e3; font-family: inherit; font-size: 14px; resize: none; outline: none; max-height: 120px; line-height: 1.4; }
+.composer-actions, .toolbar { display: flex; align-items: center; justify-content: space-between; }
+#send-btn { background: #e3e3e3; color: #0e0e10; }
+#send-btn:hover { background: #ffffff; }
+#stop-btn[hidden] { display: none; }
+/* Markdown Tables & Headings */
+.message.assistant h2, .message.assistant h3, .message.assistant h4 {
+  margin: 10px 0 6px;
+  font-weight: 600;
+  color: #ffffff;
+}
+.message.assistant hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  margin: 10px 0;
+}
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 10px 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.message.assistant table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  text-align: left;
+}
+.message.assistant th {
+  background: #1e1f20;
+  color: #8ab4f8;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.message.assistant td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  vertical-align: top;
+  line-height: 1.45;
+}
+.message.assistant tr:last-child td {
+  border-bottom: none;
+}
+
+/* v2 File Attachment Pills */
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 4px;
+}
+.attachment-list[hidden] {
+  display: none;
+}
+.attachment-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #282a2c;
+  color: #e3e3e3;
+  border: 1px solid rgba(138, 180, 248, 0.35);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  max-width: 100%;
+}
+.attachment-pill span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.attachment-pill button {
+  width: 18px;
+  height: 18px;
+  font-size: 13px;
+  color: #9aa0a6;
+}
+.attachment-pill button:hover {
+  color: #f28b82;
+  background: transparent;
+}
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.msg-attachment-badge {
+  font-size: 11px;
+  background: rgba(138, 180, 248, 0.15);
+  color: #8ab4f8;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.msg-attachment-thumb {
+  max-width: 160px;
+  max-height: 120px;
+  border-radius: 8px;
+  display: block;
+  margin-top: 4px;
+}
+
+/* Custom UI Polish for Rebrand */
+.brand {
+  font-weight: 700;
+  background: linear-gradient(135deg, #8ab4f8 0%, #c58af9 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

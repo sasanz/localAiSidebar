@@ -1,3 +1,25 @@
+const extApi = globalThis.browser || globalThis.chrome;
+
+function initSidePanel() {
+  if (extApi?.sidePanel?.setOptions) {
+    extApi.sidePanel.setOptions({ path: "sidebar/sidebar.html", enabled: true }).catch(() => {});
+  }
+  if (extApi?.sidePanel?.setPanelBehavior) {
+    extApi.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+  }
+}
+
+initSidePanel();
+extApi?.runtime?.onInstalled?.addListener(() => initSidePanel());
+extApi?.runtime?.onStartup?.addListener(() => initSidePanel());
+
+// Only attach action.onClicked in Firefox (where sidebarAction exists);
+// in Edge/Chrome, attaching action.onClicked overrides openPanelOnActionClick!
+if (extApi?.sidebarAction?.toggle) {
+  extApi.action?.onClicked?.addListener(() => {
+    extApi.sidebarAction.toggle();
+  });
+}
 const DEFAULT_SETTINGS = {
   provider: "lmstudio",
   baseUrl: "http://127.0.0.1:1234/v1",
@@ -8,17 +30,18 @@ const DEFAULT_SETTINGS = {
 
 function isRestricted(url) {
   if (!url || typeof url !== "string") return true;
-  return /^(chrome|edge|about|chrome-extension):/i.test(url);
+  return /^(chrome|edge|about|chrome-extension|moz-extension):/i.test(url);
 }
 
 async function getSettings() {
-  const stored = await chrome.storage.local.get(DEFAULT_SETTINGS);
+  const stored = await extApi?.storage.local.get(DEFAULT_SETTINGS);
   return { ...DEFAULT_SETTINGS, ...stored };
 }
 
 async function fetchAvailableModels(customBaseUrl) {
   const settings = await getSettings();
-  const baseUrl = (customBaseUrl || settings.baseUrl || DEFAULT_SETTINGS.baseUrl).replace(/\/+$/, "");
+  let baseUrl = (customBaseUrl || settings.baseUrl || DEFAULT_SETTINGS.baseUrl).replace(/\/+$/, "");
+  if (!baseUrl.endsWith("/v1")) baseUrl += "/v1";
   const res = await fetch(`${baseUrl}/models`);
   if (!res.ok) throw new Error(`HTTP ${res.status} from ${baseUrl}/models`);
   const data = await res.json();
@@ -27,13 +50,7 @@ async function fetchAvailableModels(customBaseUrl) {
   return [];
 }
 
-chrome.action?.onClicked?.addListener((tab) => {
-  if (chrome.sidePanel?.open && tab?.windowId) {
-    chrome.sidePanel.open({ windowId: tab.windowId }).catch(console.error);
-  }
-});
-
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+extApi?.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "FETCH_MODELS") {
     fetchAvailableModels(message.baseUrl)
       .then((models) => sendResponse({ ok: true, models }))
@@ -44,16 +61,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "GET_PAGE_CONTEXT") {
     (async () => {
       try {
-        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        const [tab] = await extApi?.tabs.query({ active: true, lastFocusedWindow: true });
         if (!tab || !tab.id || isRestricted(tab.url)) {
           sendResponse({ error: "Cannot read browser system pages." });
           return;
         }
-        await chrome.scripting.executeScript({
+        await extApi?.scripting.executeScript({
           target: { tabId: tab.id },
           files: ["content/extractor.js"]
         });
-        const result = await chrome.tabs.sendMessage(tab.id, { type: "EXTRACT_TEXT" });
+        const result = await extApi?.tabs.sendMessage(tab.id, { type: "EXTRACT_TEXT" });
         sendResponse(result || { error: "Empty page response." });
       } catch (err) {
         sendResponse({ error: err.message || "Failed to read tab." });
@@ -63,7 +80,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
-chrome.runtime.onConnect.addListener((port) => {
+extApi?.runtime.onConnect.addListener((port) => {
   if (port.name !== "ai-stream") return;
   let controller = null;
 
@@ -159,3 +176,7 @@ chrome.runtime.onConnect.addListener((port) => {
     }
   });
 });
+
+if (typeof module !== "undefined") {
+  module.exports = { isRestricted, fetchAvailableModels, DEFAULT_SETTINGS, initSidePanel };
+}

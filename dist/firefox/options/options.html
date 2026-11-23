@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Local AI Sidebar Settings</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #121212;
+      color: #e0e0e0;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    form {
+      background: #1e1e1e;
+      border-radius: 8px;
+      padding: 20px;
+      width: 320px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, .5);
+    }
+    label {
+      display: block;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+    input[type=text],
+    input[type=number],
+    textarea {
+      width: 100%;
+      padding: 6px;
+      border: none;
+      background: #333;
+      color: #fff;
+      border-radius: 4px;
+      margin-top: 4px;
+      box-sizing: border-box;
+    }
+    textarea {
+      resize: none;
+      height: 80px;
+    }
+    button {
+      margin-top: 16px;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 4px;
+      background: #3a86ff;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button[type=button] {
+      background: #555;
+    }
+    #status-msg {
+      display: block;
+      margin-top: 10px;
+      color: #90ee90;
+      font-size: 13px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <form id="settings-form">
+    <label for="provider">Provider</label>
+    <select id="provider" name="provider">
+      <option value="lmstudio">LM Studio</option>
+      <option value="ollama">Ollama</option>
+    </select>
+
+    <label for="baseUrl">Base URL</label>
+    <input type="text" id="baseUrl" name="baseUrl"><div id="server-status">Checking server...</div>
+
+    <label for="model">Model</label>
+    <select id="model" name="model"><option value="">Auto-select first model</option></select><button type="button" id="refresh-models-btn">Refresh</button>
+
+    <label for="maxContextChars">Max Context Characters</label>
+    <input type="number" id="maxContextChars" name="maxContextChars" min="0">
+
+    <label for="systemPrompt">System Prompt</label>
+    <textarea id="systemPrompt" name="systemPrompt"></textarea>
+
+    <button type="submit">Save Settings</button>
+    <button type="button" id="reset-btn">Reset to Defaults</button>
+    <span id="status-msg"></span>
+  </form>
+  <script src="options.js"></script>
+</body>
+</html>
