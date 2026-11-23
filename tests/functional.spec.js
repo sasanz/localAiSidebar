@@ -111,6 +111,11 @@ test.describe("Local AI Sidebar Full Functional Suite", () => {
       const optionsPage = await context.newPage();
       await optionsPage.goto(`chrome-extension://${extId}/options/options.html`);
 
+      // Wait for the initial default-settings model probe to settle so a late
+      // response cannot overwrite the mock model list populated below.
+      await expect(optionsPage.locator("#baseUrl")).toHaveValue("http://localhost:1234/v1");
+      await expect(optionsPage.locator("#server-status")).not.toHaveText("Checking server...");
+
       await optionsPage.selectOption("#provider", "ollama");
       await optionsPage.fill("#baseUrl", env.aiBaseUrl);
       await optionsPage.fill("#maxContextChars", "5000");
@@ -207,6 +212,101 @@ test.describe("Local AI Sidebar Full Functional Suite", () => {
       await sidebar.fill("#user-input", "Test offline handling");
       await sidebar.click("#send-btn");
       await expect(sidebar.locator("#chat-messages .message").last()).toContainText(/error|failed|fetch/i);
+    } finally {
+      await context.close();
+      env.close();
+    }
+  });
+
+  test("Covers options provider defaults and reset, attachment removal, multiline input, and restricted page context", async () => {
+    test.setTimeout(90000);
+    const env = await startMockServers();
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "local-ai-edge-"));
+
+    const context = await chromium.launchPersistentContext(userDataDir, {
+      headless: false,
+      args: [
+        `--disable-extensions-except=${EXTENSION_PATH}`,
+        `--load-extension=${EXTENSION_PATH}`
+      ]
+    });
+
+    try {
+      let [sw] = context.serviceWorkers();
+      if (!sw) sw = await context.waitForEvent("serviceworker", { timeout: 15000 });
+      const extId = sw.url().split("/")[2];
+
+      // 1. OPTIONS PAGE EDGE CASES: provider-driven baseUrl, unreachable server, reset
+      const optionsPage = await context.newPage();
+      await optionsPage.goto(`chrome-extension://${extId}/options/options.html`);
+      await expect(optionsPage.locator("#baseUrl")).toHaveValue("http://localhost:1234/v1");
+
+      await optionsPage.selectOption("#provider", "ollama");
+      await expect(optionsPage.locator("#baseUrl")).toHaveValue("http://127.0.0.1:11434/v1");
+
+      await optionsPage.selectOption("#provider", "lmstudio");
+      await expect(optionsPage.locator("#baseUrl")).toHaveValue("http://localhost:1234/v1");
+
+      await optionsPage.fill("#baseUrl", "http://127.0.0.1:1/v1");
+      await optionsPage.click("#refresh-models-btn");
+      await expect(optionsPage.locator("#server-status")).toHaveText("Server not reachable");
+
+      await optionsPage.click("#reset-btn");
+      await expect(optionsPage.locator("#provider")).toHaveValue("lmstudio");
+      await expect(optionsPage.locator("#baseUrl")).toHaveValue("http://localhost:1234/v1");
+      await expect(optionsPage.locator("#maxContextChars")).toHaveValue("12000");
+      await expect(optionsPage.locator("#status-msg")).toHaveText("Reset to defaults.");
+      await optionsPage.close();
+
+      // 2. SIDEBAR EDGE CASES
+      const sidebar = await context.newPage();
+      await sidebar.goto(`chrome-extension://${extId}/sidebar/sidebar.html`);
+      await sidebar.evaluate(async (url) => {
+        await chrome.storage.local.set({ provider: "lmstudio", baseUrl: url, model: "qwen3-30b-mock" });
+      }, env.aiBaseUrl);
+      await sidebar.reload();
+      await expect(sidebar.locator("#model-select")).toContainText("qwen3-30b-mock");
+
+      // 2a. Removing one of two attached text files
+      await sidebar.setInputFiles("#file-input", [
+        { name: "keep.txt", mimeType: "text/plain", buffer: Buffer.from("keep this file") },
+        { name: "drop.txt", mimeType: "text/plain", buffer: Buffer.from("drop this file") }
+      ]);
+      await expect(sidebar.locator("#attachment-list")).toContainText("keep.txt");
+      await expect(sidebar.locator("#attachment-list")).toContainText("drop.txt");
+
+      await sidebar
+        .locator(".attachment-pill", { hasText: "drop.txt" })
+        .locator('button[title="Remove"]')
+        .click();
+
+      await expect(sidebar.locator("#attachment-list")).toContainText("keep.txt");
+      await expect(sidebar.locator("#attachment-list")).not.toContainText("drop.txt");
+
+      // 2b. Shift+Enter inserts a newline without sending; Enter sends
+      await expect(sidebar.locator("#chat-messages .message")).toHaveCount(0);
+      await sidebar.locator("#user-input").focus();
+      await sidebar.keyboard.type("Line 1");
+      await sidebar.keyboard.press("Shift+Enter");
+      await sidebar.keyboard.type("Line 2");
+      await expect(sidebar.locator("#user-input")).toHaveValue("Line 1\nLine 2");
+      await expect(sidebar.locator("#chat-messages .message")).toHaveCount(0);
+
+      await sidebar.keyboard.press("Enter");
+      await expect(sidebar.locator("#chat-messages .message.user")).toHaveCount(1);
+      await expect(sidebar.locator("#chat-messages .message.user")).toContainText("Line 1");
+      await expect(sidebar.locator("#chat-messages .message.user")).toContainText("Line 2");
+
+      // 2c. Refreshing page context from a restricted browser tab
+      const restrictedTab = await context.newPage();
+      try {
+        await restrictedTab.goto("chrome://version");
+      } catch {
+        await restrictedTab.goto("chrome://settings");
+      }
+      await restrictedTab.bringToFront();
+      await sidebar.locator("#refresh-page-btn").click();
+      await expect(sidebar.locator("#page-status")).toHaveText("Cannot read browser system pages.");
     } finally {
       await context.close();
       env.close();

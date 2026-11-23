@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { renderMarkdown, escapeHtml, loadModels, normalizeBaseUrl } = require("../sidebar/sidebar.js");
-const { classifyFile, extractTextFromDocxXml, buildUserMessagePayload } = require("../sidebar/file-parser.js");
+const { classifyFile, extractTextFromDocxXml, buildUserMessagePayload, parseAttachment } = require("../sidebar/file-parser.js");
 const { isRestricted, fetchAvailableModels } = require("../background/service-worker.js");
 
 const rootDir = path.resolve(__dirname, "..");
@@ -209,4 +209,249 @@ test("fetchAvailableModels handles both OpenAI data[] and Ollama models[] schema
 
   delete globalThis.browser;
   delete globalThis.fetch;
+});
+
+test("parseAttachment rejects unsupported file types", async () => {
+  await assert.rejects(
+    parseAttachment({ name: "a.zip", type: "application/zip" }),
+    /Unsupported file type/
+  );
+});
+
+test("parseAttachment resolves text files with their text content", async () => {
+  const result = await parseAttachment({
+    name: "a.txt",
+    type: "text/plain",
+    text: async () => "hi"
+  });
+  assert.deepEqual(result, { name: "a.txt", kind: "text", text: "hi" });
+});
+
+test("parseAttachment resolves image files to a data URL via FileReader", async () => {
+  try {
+    globalThis.FileReader = class MockFileReader {
+      readAsDataURL() {
+        this.result = "data:image/png;base64,ABC";
+        this.onload();
+      }
+    };
+
+    const result = await parseAttachment({ name: "a.png", type: "image/png" });
+    assert.deepEqual(result, {
+      name: "a.png",
+      kind: "image",
+      dataUrl: "data:image/png;base64,ABC"
+    });
+  } finally {
+    delete globalThis.FileReader;
+  }
+});
+
+test("parseAttachment extracts DOCX text and rejects archives missing document.xml", async () => {
+  try {
+    globalThis.JSZip = {
+      loadAsync: async () => ({
+        file: (p) =>
+          p === "word/document.xml"
+            ? { async: async () => "<w:p><w:t>Docx text</w:t></w:p>" }
+            : null
+      })
+    };
+
+    const result = await parseAttachment({
+      name: "doc.docx",
+      type: "",
+      arrayBuffer: async () => new ArrayBuffer(8)
+    });
+    assert.deepEqual(result, { name: "doc.docx", kind: "docx", text: "Docx text" });
+
+    globalThis.JSZip = {
+      loadAsync: async () => ({ file: () => null })
+    };
+
+    await assert.rejects(
+      parseAttachment({
+        name: "bad.docx",
+        type: "",
+        arrayBuffer: async () => new ArrayBuffer(8)
+      }),
+      /Invalid DOCX archive/
+    );
+  } finally {
+    delete globalThis.JSZip;
+  }
+});
+
+test("parseAttachment extracts PDF page text", async () => {
+  try {
+    globalThis.pdfjsLib = {
+      GlobalWorkerOptions: {},
+      getDocument: () => ({
+        promise: Promise.resolve({
+          numPages: 1,
+          getPage: async () => ({
+            getTextContent: async () => ({ items: [{ str: "Page" }, { str: "one" }] })
+          })
+        })
+      })
+    };
+
+    const result = await parseAttachment({
+      name: "file.pdf",
+      type: "application/pdf",
+      arrayBuffer: async () => new ArrayBuffer(8)
+    });
+    assert.deepEqual(result, { name: "file.pdf", kind: "pdf", text: "[Page 1]\nPage one" });
+  } finally {
+    delete globalThis.pdfjsLib;
+  }
+});
+
+test("content extractor ignores other messages and extracts normalized text on a clone", () => {
+  const extractorPath = require.resolve("../content/extractor.js");
+  const removedTags = [];
+  let listener = null;
+  let originalBodyQueried = false;
+  const originalBody = {
+    querySelectorAll() {
+      originalBodyQueried = true;
+      return { forEach: () => {} };
+    }
+  };
+  const clonedBody = {
+    innerText: "  Hello   \n\n  World  ",
+    querySelectorAll(tag) {
+      return {
+        forEach(cb) {
+          cb({ remove: () => removedTags.push(tag) });
+        }
+      };
+    }
+  };
+
+  try {
+    delete require.cache[extractorPath];
+
+    globalThis.chrome = {
+      runtime: { onMessage: { addListener: (fn) => { listener = fn; } } }
+    };
+    globalThis.window = { location: { href: "https://example.com/article" } };
+    globalThis.document = {
+      title: "Sample Page",
+      body: {
+        cloneNode: (deep) => {
+          assert.equal(deep, true);
+          return clonedBody;
+        },
+        querySelectorAll: originalBody.querySelectorAll
+      }
+    };
+
+    require("../content/extractor.js");
+
+    const otherResponses = [];
+    const otherResult = listener({ type: "OTHER" }, {}, (r) => otherResponses.push(r));
+    assert.equal(otherResult, undefined);
+    assert.deepEqual(otherResponses, []);
+
+    const responses = [];
+    const result = listener({ type: "EXTRACT_TEXT" }, {}, (r) => responses.push(r));
+    assert.equal(result, true);
+    assert.deepEqual(removedTags, [
+      "script", "style", "noscript", "nav", "footer", "header", "aside", "iframe", "svg"
+    ]);
+    assert.equal(originalBodyQueried, false, "extractor must not mutate the live document.body");
+    assert.deepEqual(responses, [{
+      title: "Sample Page",
+      url: "https://example.com/article",
+      text: "Hello World"
+    }]);
+  } finally {
+    delete require.cache[extractorPath];
+    delete globalThis.chrome;
+    delete globalThis.window;
+    delete globalThis.document;
+  }
+});
+
+test("renderMarkdown renders headings, horizontal rules, and inline code", () => {
+  assert.equal(renderMarkdown("# H1"), "<h2>H1</h2>");
+  assert.equal(renderMarkdown("## H2"), "<h3>H2</h3>");
+  assert.equal(renderMarkdown("### H3"), "<h4>H3</h4>");
+  assert.equal(renderMarkdown("---"), "<hr>");
+  assert.equal(renderMarkdown("`code`"), "<code>code</code>");
+});
+
+test("service worker handles page context and ai-stream chat errors with context truncation", async () => {
+  const swPath = require.resolve("../background/service-worker.js");
+  let onMessage = null;
+  let onConnect = null;
+  const posted = [];
+  let fetchBody = null;
+
+  try {
+    delete require.cache[swPath];
+
+    globalThis.chrome = {
+      runtime: {
+        onMessage: { addListener: (fn) => { onMessage = fn; } },
+        onConnect: { addListener: (fn) => { onConnect = fn; } },
+        onInstalled: { addListener: () => {} },
+        onStartup: { addListener: () => {} }
+      },
+      storage: {
+        local: {
+          get: async () => ({
+            provider: "lmstudio",
+            baseUrl: "http://127.0.0.1:1234/v1",
+            model: "test-model",
+            systemPrompt: "Sys",
+            maxContextChars: 5
+          })
+        }
+      },
+      tabs: {
+        query: async () => [{ id: 1, url: "chrome://settings" }],
+        sendMessage: async () => ({})
+      }
+    };
+
+    require("../background/service-worker.js");
+    assert.equal(typeof onMessage, "function");
+    assert.equal(typeof onConnect, "function");
+
+    const pageResponse = await new Promise((resolve) => {
+      const returned = onMessage({ type: "GET_PAGE_CONTEXT" }, {}, resolve);
+      assert.equal(returned, true);
+    });
+    assert.deepEqual(pageResponse, { error: "Cannot read browser system pages." });
+
+    const port = {
+      name: "ai-stream",
+      onDisconnect: { addListener: () => {} },
+      onMessage: { addListener: (fn) => { port.handler = fn; } },
+      postMessage: (msg) => posted.push(msg)
+    };
+    onConnect(port);
+    assert.equal(typeof port.handler, "function");
+
+    globalThis.fetch = async (_url, options) => {
+      fetchBody = JSON.parse(options.body);
+      return { ok: false, status: 500, text: async () => "Server failure" };
+    };
+
+    await port.handler({
+      action: "CHAT",
+      pageContext: { title: "T", url: "https://a.com", text: "1234567890" }
+    });
+
+    assert.deepEqual(posted, [{ type: "ERROR", error: "HTTP 500: Server failure" }]);
+    assert.equal(fetchBody.messages[0].role, "system");
+    assert.equal(fetchBody.messages[0].content.includes("Content:\n12345"), true);
+    assert.equal(fetchBody.messages[0].content.includes("1234567890"), false);
+  } finally {
+    delete require.cache[swPath];
+    delete globalThis.chrome;
+    delete globalThis.fetch;
+  }
 });
