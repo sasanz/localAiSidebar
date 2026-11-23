@@ -124,3 +124,11 @@ footer:focus-within, .composer:focus-within { border-color: #8ab4f8; }
   display: block;
   margin-top: 4px;
 }
+
+/* Custom UI Polish for Rebrand */
+.brand {
+  font-weight: 700;
+  background: linear-gradient(135deg, #8ab4f8 0%, #c58af9 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
