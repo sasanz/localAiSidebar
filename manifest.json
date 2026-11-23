@@ -1,0 +1,20 @@
+{
+  "name": "Local AI Sidebar",
+  "description": "A cross-browser MV3 extension providing an AI sidebar.",
+  "version": "1.0",
+  "manifest_version": 3,
+  "permissions": ["sidePanel", "activeTab", "scripting", "storage", "tabs"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background/service-worker.js"
+    
+  },
+  "side_panel": {
+    "default_path": "sidebar/sidebar.html"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "action": {}
+}
